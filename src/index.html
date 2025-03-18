@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minute event timer</title>
+    <link rel="stylesheet" href="output.css">
+    <style>
+        :root {
+            --clock-w: 200px;
+        }
+
+        .play-icon {
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-left: 10px solid currentColor;
+        }
+
+        .sound-btn {
+            box-shadow: 0 2px 0 #202020, 0 1px 3px rgba(0, 0, 0, 0.3);
+        }
+
+        .sound-btn[data-active] {
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.1);
+            transform: translateY(1px);
+        }
+
+        #second-hand {
+            width: calc(var(--clock-w) / 100);
+            height: calc(var(--clock-w) / 2 * 0.9);
+            bottom: calc(var(--clock-w) / 2);
+        }
+
+        .center-dot {
+            height: calc(var(--clock-w) / 20);
+            width: calc(var(--clock-w) / 20);
+        }
+
+    </style>
+</head>
+<body class="bg-background text-primary-foreground mt-5 flex flex-col items-center">
+<h1 class="text-center text-primary text-2xl font-bold mb-5">Minute event timer</h1>
+
+<div class="circle-timer relative size-[var(--clock-w)] mt-5 mb-10 flex flex-col items-center justify-center">
+    <div class="circle-background absolute size-full rounded-full bg-card border-2 border-border"></div>
+    <div id="event-markers-container"></div>
+    <div id="second-hand" class="origin-bottom absolute bg-primary z-10"></div>
+    <div class="center-dot absolute bg-primary rounded-full"></div>
+    <div id="seconds" class="absolute text-2xl -translate-y-6">0</div>
+</div>
+
+<div class="controls flex justify-center gap-2.5 mb-5 text-sm">
+    <button id="start-btn"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover disabled:bg-dim disabled:text-marker disabled:cursor-not-allowed">
+        Start
+    </button>
+    <button id="toggle-btn"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover disabled:bg-dim disabled:text-marker disabled:cursor-not-allowed"
+            disabled>
+                <span id="pause-play-icon" class="inline-block size-3 mr-1 relative top-0.5">
+                    <span class="pause-icon flex">
+                        <span class="w-1 h-3 bg-current mr-1"></span>
+                        <span class="w-1 h-3 bg-current"></span>
+                    </span>
+                </span>
+        Pause
+    </button>
+    <button id="stop-btn"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover disabled:bg-dim disabled:text-marker disabled:cursor-not-allowed"
+            disabled>Stop
+    </button>
+</div>
+
+<div class="flex justify-center gap-2.5 mb-5 text-sm">
+    <button id="sec-down"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover">
+        -1s
+    </button>
+    <button id="sec-up"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover">
+        +1s
+    </button>
+</div>
+
+<div class="mt-5 w-full max-w-3xl space-y-2.5">
+    <div class="flex justify-between items-center px-2">
+        <h2 class="m-0 text-lg text-primary font-bold">Events</h2>
+        <button id="add-event-btn"
+                class="add-event-btn flex items-center justify-center gap-1 bg-button border-none py-2 px-3 rounded cursor-pointer text-sm transition-colors hover:bg-button-hover">
+            <span class="text-base font-bold">+</span> Add Event
+        </button>
+    </div>
+    <div id="events-list"></div>
+</div>
+<script>
+    // DO NOT TOUCH! THIS IS REPLACES BY build.js WITH label->base64 MAPPING!
+    const sounds = {}
+
+    if (!Object.keys(sounds).length) {
+        sounds["Sound 1"] = "src/notification.mp3"
+        sounds["Sound 2"] = "src/notification2.mp3"
+        sounds["Sound 3"] = "src/notification3.mp3"
+        sounds["Sound 4"] = "src/notification4.mp3"
+        sounds["Sound 5"] = "src/notification5.mp3"
+        sounds["Sound 6"] = "src/notification6.mp3"
+    }
+
+    const soundUrls = Object.values(sounds)
+    const soundLabels = Object.keys(sounds)
+
+    const defaultSound = soundUrls[0];
+    const STORAGE_KEY = 'minute-event-timer-data';
+
+    const audioCache = {};
+    soundUrls.forEach(url => {
+        if (!audioCache[url]) {
+            const audio = new Audio(url);
+            audio.loop = false;
+            audio.autoplay = false;
+            audio.load();
+            audioCache[url] = audio
+        }
+    });
+
+    const secondHandElement = document.getElementById('second-hand');
+    const secondsElement = document.getElementById('seconds');
+    const startBtn = document.getElementById('start-btn');
+    const toggleBtn = document.getElementById('toggle-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const pausePlayIcon = document.getElementById('pause-play-icon');
+    const secDownBtn = document.getElementById('sec-down');
+    const secUpBtn = document.getElementById('sec-up');
+    const addEventBtn = document.getElementById('add-event-btn');
+    const eventsListElement = document.getElementById('events-list');
+    const eventMarkersContainer = document.getElementById('event-markers-container');
+
+    let isRunning = false;
+    let isPaused = false;
+    let events = [];
+    let nextEventId = 1;
+    let startTime = 0;
+    let pausedTime = 0;
+    let totalPausedTime = 0;
+    let lastSecond = 0;
+    let animationFrameId = null;
+    let currentSecondPosition = 0;
+
+    const eventColors = [
+        '#9c27b0',
+        '#2196F3',
+        '#FF9800',
+        '#E91E63',
+        '#00BCD4',
+        '#FFEB3B'
+    ];
+
+    function saveAppState() {
+        const appState = {
+            events: events.map(event => ({
+                name: event.name,
+                time: event.time,
+                soundUrl: event.soundUrl,
+                volume: event.volume,
+                color: event.color
+            }))
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+    }
+
+    function loadAppState() {
+        try {
+            const savedState = localStorage.getItem(STORAGE_KEY);
+            if (savedState) {
+                const appState = JSON.parse(savedState);
+
+                events = [];
+                eventsListElement.innerHTML = '';
+                eventMarkersContainer.innerHTML = '';
+
+                if (appState.events && appState.events.length > 0) {
+                    appState.events.forEach(event => {
+                        addEvent(event);
+                    });
+                } else {
+                    addEvent({
+                        name: 'Task 1',
+                        time: 35,
+                        soundUrl: defaultSound,
+                        volume: 50,
+                        color: eventColors[0]
+                    });
+                }
+                return true;
+            }
+        } catch (error) {
+            console.error('Error loading saved state:', error);
+        }
+        return false;
+    }
+
+    function init() {
+        updateSecondHand(0);
+        createTimeMarkers();
+
+        const stateLoaded = loadAppState();
+
+        if (!stateLoaded) {
+            addEvent({
+                name: 'Task 1',
+                time: 35,
+                soundUrl: defaultSound,
+                volume: 50,
+                color: eventColors[0]
+            });
+        }
+
+        startBtn.addEventListener('click', startTimer);
+        toggleBtn.addEventListener('click', toggleTimer);
+        stopBtn.addEventListener('click', stopTimer);
+        secDownBtn.addEventListener('click', () => adjustClockTime(-1));
+        secUpBtn.addEventListener('click', () => adjustClockTime(1));
+        addEventBtn.addEventListener('click', () => {
+            addEvent({
+                name: 'New Event',
+                time: 0,
+                soundUrl: soundUrls[0],
+                volume: 50,
+                color: eventColors[events.length % eventColors.length]
+            });
+            saveAppState();
+        });
+    }
+
+    function createTimeMarkers() {
+        const circleTimer = document.querySelector('.circle-timer');
+        for (let i = 0; i < 12; i++) {
+            const marker = document.createElement('div');
+            marker.className = 'absolute bg-marker'
+            marker.style.height = i % 3 === 0 ? '17px' : '10px';
+            marker.style.width = i % 3 === 0 ? '2px' : '1px';
+            marker.style.transform = `rotate(${i * 30}deg) translateY(-94px)`;
+            circleTimer.appendChild(marker);
+        }
+    }
+
+    function addEvent(eventData) {
+        const event = {
+            id: nextEventId++,
+            name: eventData.name,
+            time: eventData.time,
+            soundUrl: eventData.soundUrl || defaultSound,
+            volume: eventData.volume,
+            color: eventData.color
+        };
+
+        events.push(event);
+        renderEventCard(event);
+        updateEventMarkers();
+    }
+
+    function removeEvent(eventId) {
+        events = events.filter(event => event.id !== eventId);
+        document.getElementById(`event-${eventId}`).remove();
+        document.getElementById(`event-marker-${eventId}`).remove();
+        saveAppState();
+    }
+
+    function updateEvent(eventId, field, value) {
+        const event = events.find(e => e.id === eventId);
+        if (event) {
+            event[field] = value;
+
+            if (field === 'time') {
+                updateEventMarker(event);
+                const numberInput = document.getElementById(`event-time-number-${eventId}`);
+                if (numberInput && numberInput.value !== value.toString()) {
+                    numberInput.value = value;
+                }
+                const sliderInput = document.getElementById(`event-time-slider-${eventId}`);
+                if (sliderInput && sliderInput.value !== value.toString()) {
+                    sliderInput.value = value;
+                }
+            }
+
+            if (field === 'color') {
+                updateEventMarker(event);
+                document.getElementById(`event-${eventId}`).style.borderLeftColor = value;
+                document.getElementById(`color-indicator-${eventId}`).style.backgroundColor = value;
+            }
+
+            if (field === 'soundUrl') {
+                updateSoundButtons(eventId, value);
+            }
+
+            saveAppState();
+        }
+    }
+
+    function updateSoundButtons(eventId, soundUrl) {
+        soundUrls.forEach((url, index) => {
+            const button = document.getElementById(`sound-btn-${eventId}-${index}`);
+            if (button) {
+                if (url === soundUrl) {
+                    button.setAttribute('data-active', 'true');
+                } else {
+                    button.removeAttribute('data-active');
+                }
+            }
+        });
+    }
+
+    function selectSound(eventId, soundIndex) {
+        const soundUrl = soundUrls[soundIndex];
+        updateEvent(eventId, 'soundUrl', soundUrl);
+
+        const event = events.find(e => e.id === eventId);
+        if (event) {
+            playSound(soundUrl, event.volume);
+        }
+    }
+
+    function playSound(soundUrl, volume = 50) {
+        const audio = audioCache[soundUrl];
+        if (!audio.paused) {
+            audio.pause();
+            audio.currentTime = 0;
+        }
+        audio.volume = volume / 100;
+        audio.play().catch(error => {
+            console.error('Error playing sound:', error);
+        });
+    }
+
+    function renderEventCard(event) {
+        const eventCard = document.createElement('div');
+        eventCard.id = `event-${event.id}`;
+        eventCard.className = 'bg-card p-3 rounded-lg mb-2.5 relative border-l-4';
+        eventCard.style.borderLeftColor = event.color;
+
+        let soundButtonsHtml = '';
+        soundUrls.forEach((url, index) => {
+            const isActive = event.soundUrl === url;
+            soundButtonsHtml += `
+                <button id="sound-btn-${event.id}-${index}"
+                        ${isActive ? 'data-active="true"' : ''}
+                        class="sound-btn bg-button border border-border px-3 py-2 text-sm rounded
+                        transition-all duration-100 relative hover:bg-button-hover data-active:bg-sound-select
+                        data-active:border-sound-select-border"
+                        onclick="selectSound(${event.id}, ${index})"
+                >
+                    ${soundLabels[index]}
+                </button>
+            `;
+        });
+
+        eventCard.innerHTML = `
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold m-0 text-base flex items-center">
+                        <span id="color-indicator-${event.id}" class="inline-block w-3 h-3 rounded-full mr-1" style="background-color: ${event.color}"></span>
+                        <input type="text" class="w-[150px] inline-block p-1.5 bg-background border border-border rounded" value="${event.name}" onchange="updateEvent(${event.id}, 'name', this.value)">
+                    </h3>
+                    <div class="flex gap-1">
+                        <button class="bg-red-900/20 text-red-400 p-1 px-2 text-xs rounded hover:bg-red-900/30" onclick="removeEvent(${event.id})">Remove</button>
+                    </div>
+                </div>
+
+                <div class="flex mb-3 items-center flex-wrap">
+                    <div class="w-[150px] text-sm mr-2.5">Alert Time (seconds):</div>
+                    <div class="flex-1 flex items-center gap-2">
+                        <input type="number" id="event-time-number-${event.id}" class="w-[50px] text-center p-1.5 bg-background border border-border rounded" min="0" max="59" value="${event.time}"
+                               onchange="updateEvent(${event.id}, 'time', parseInt(this.value))">
+                        <input
+                            type="range"
+                            id="event-time-slider-${event.id}"
+                            class="flex-1 cursor-pointer rounded-full bg-gray-700 h-1.5"
+                            min="0" max="59"
+                            value="${event.time}"
+                            oninput="updateEvent(${event.id}, 'time', parseInt(this.value))"
+                        >
+                    </div>
+                </div>
+
+                <div class="flex mb-3 items-center flex-wrap">
+                    <div class="w-[150px] text-sm mr-2.5">Volume: <span id="volume-value-${event.id}">${event.volume}%</span></div>
+                    <div class="flex-1 flex items-center gap-2">
+                        <input type="range" id="event-volume-${event.id}" class="flex-1 cursor-pointer rounded-full bg-gray-700 h-1.5" min="0" max="100" value="${event.volume}"
+                               oninput="updateVolumeDisplay(${event.id}, this.value); updateEvent(${event.id}, 'volume', parseInt(this.value))">
+                    </div>
+                </div>
+
+                <div class="flex mb-1 items-center flex-wrap">
+                    <div class="text-sm mr-2.5">Sound:</div>
+                    <div class="flex-1 flex items-center gap-2 text-nowrap flex-wrap">
+                        ${soundButtonsHtml}
+                    </div>
+                </div>
+            `;
+
+        eventsListElement.appendChild(eventCard);
+        createEventMarker(event);
+    }
+
+    function createEventMarker(event) {
+        const marker = document.createElement('div');
+        marker.id = `event-marker-${event.id}`;
+        marker.className = 'origin-[bottom_center] absolute w-1 h-[15px] bottom-[100px] left-[98px] z-[1]';
+        marker.style.backgroundColor = event.color;
+
+        const rotation = event.time * 6; // 6 degrees per second
+        marker.style.transform = `rotate(${rotation}deg) translateY(-90px)`;
+
+        eventMarkersContainer.appendChild(marker);
+    }
+
+    function updateEventMarker(event) {
+        const marker = document.getElementById(`event-marker-${event.id}`);
+        if (marker) {
+            marker.style.backgroundColor = event.color;
+            const rotation = event.time * 6; // 6 degrees per second
+            marker.style.transform = `rotate(${rotation}deg) translateY(-90px)`;
+        }
+    }
+
+    function updateEventMarkers() {
+        eventMarkersContainer.innerHTML = '';
+        events.forEach(createEventMarker);
+    }
+
+    function updateVolumeDisplay(eventId, value) {
+        document.getElementById(`volume-value-${eventId}`).textContent = `${value}%`;
+    }
+
+    function startTimer() {
+        if (!isRunning) {
+            isRunning = true;
+            isPaused = false;
+            startTime = performance.now() - (currentSecondPosition * 1000);
+            totalPausedTime = 0;
+            lastSecond = Math.floor(currentSecondPosition);
+            requestAnimationFrame(updateTimerFrame);
+            updateButtonStates();
+            updatePausePlayIcon();
+        }
+    }
+
+    function toggleTimer() {
+        if (isRunning && !isPaused) {
+            // Pause
+            isPaused = true;
+            pausedTime = performance.now();
+            if (animationFrameId) {
+                clearTimeout(animationFrameId);
+            }
+        } else if (isRunning && isPaused) {
+            // Resume
+            isPaused = false;
+            totalPausedTime += performance.now() - pausedTime;
+            requestAnimationFrame(updateTimerFrame);
+        }
+        updatePausePlayIcon();
+    }
+
+    function stopTimer() {
+        isRunning = false;
+        isPaused = false;
+        if (animationFrameId) {
+            clearTimeout(animationFrameId);
+            animationFrameId = null;
+        }
+        currentSecondPosition = 0;
+        updateSecondHand(0);
+        updateButtonStates();
+        updatePausePlayIcon();
+    }
+
+    function adjustClockTime(seconds) {
+        if (isRunning) {
+            // If timer is running, adjust the startTime
+            startTime -= seconds * 1000;
+        } else {
+            // If timer is not running, just update the display
+            currentSecondPosition = (currentSecondPosition + seconds) % 60;
+            if (currentSecondPosition < 0) currentSecondPosition += 60;
+            updateSecondHand(currentSecondPosition);
+        }
+    }
+
+    function updateTimerFrame(timestamp) {
+        if (!isRunning || isPaused) return;
+
+        const elapsedMs = timestamp - startTime - totalPausedTime;
+        const currentSeconds = Math.floor(elapsedMs / 1000);
+
+        currentSecondPosition = (elapsedMs / 1000) % 60;
+
+        if (currentSeconds > lastSecond) {
+            // Check if we need to play any event alerts
+            const secondPosition = Math.floor(currentSecondPosition);
+            events.forEach(event => {
+                if (secondPosition === event.time) {
+                    playEventAlert(event);
+                }
+            });
+
+            lastSecond = currentSeconds;
+        }
+
+        // Update second hand position (smooth animation but throttled)
+        updateSecondHand(currentSecondPosition);
+
+        // Continue the animation loop with throttling to ~30fps
+        animationFrameId = setTimeout(() => {
+            requestAnimationFrame(updateTimerFrame);
+        }, 33); // ~30fps (1000ms / 30 ≈ 33ms)
+    }
+
+    function updateSecondHand(second) {
+        secondsElement.textContent = Math.floor(second);
+
+        const rotation = second * 6;
+        secondHandElement.style.transform = `rotate(${rotation}deg)`;
+    }
+
+    function playEventAlert(event) {
+        playSound(event.soundUrl, event.volume);
+    }
+
+    function updateButtonStates() {
+        startBtn.disabled = isRunning;
+        stopBtn.disabled = !isRunning;
+        toggleBtn.disabled = !isRunning;
+    }
+
+    function updatePausePlayIcon() {
+        pausePlayIcon.className = 'inline-block w-3 h-3 mr-1 relative top-0.5';
+        pausePlayIcon.innerHTML = '';
+
+        if (isPaused) {
+            const playIcon = document.createElement('span');
+            playIcon.className = 'play-icon block ml-0.5';
+            pausePlayIcon.appendChild(playIcon);
+            toggleBtn.textContent = ' Continue';
+            toggleBtn.prepend(pausePlayIcon);
+        } else {
+            const pauseIcon = document.createElement('span');
+            pauseIcon.className = 'flex';
+            pauseIcon.innerHTML = `
+                    <span class="w-1 h-3 bg-current mr-1"></span>
+                    <span class="w-1 h-3 bg-current"></span>
+                `;
+            pausePlayIcon.appendChild(pauseIcon);
+            toggleBtn.textContent = ' Pause';
+            toggleBtn.prepend(pausePlayIcon);
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
+
