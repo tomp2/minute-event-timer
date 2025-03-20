@@ -3,7 +3,7 @@ const path = require('path');
 const {execSync} = require('child_process');
 
 const INPUT_HTML = './src/index.html';
-const OUTPUT_HTML = './dist/index.html';
+const OUTPUT_HTML = './index.html';
 
 const AUDIO_FILES = fs.readdirSync('./src').filter(file => path.extname(file) === '.mp3');
 
