@@ -72,6 +72,10 @@
 </div>
 
 <div class="flex justify-center gap-2.5 mb-5 text-sm">
+    <button id="sec-down-10"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover">
+        -10s
+    </button>
     <button id="sec-down"
             class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover">
         -1s
@@ -79,6 +83,10 @@
     <button id="sec-up"
             class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover">
         +1s
+    </button>
+    <button id="sec-up-10"
+            class="bg-button border-none py-2 px-3 rounded cursor-pointer transition-colors hover:bg-button-hover">
+        +10s
     </button>
 </div>
 
@@ -130,6 +138,8 @@
     const pausePlayIcon = document.getElementById('pause-play-icon');
     const secDownBtn = document.getElementById('sec-down');
     const secUpBtn = document.getElementById('sec-up');
+    const secDown10Btn = document.getElementById('sec-down-10');
+    const secUp10Btn = document.getElementById('sec-up-10');
     const addEventBtn = document.getElementById('add-event-btn');
     const eventsListElement = document.getElementById('events-list');
     const eventMarkersContainer = document.getElementById('event-markers-container');
@@ -219,6 +229,8 @@
         stopBtn.addEventListener('click', stopTimer);
         secDownBtn.addEventListener('click', () => adjustClockTime(-1));
         secUpBtn.addEventListener('click', () => adjustClockTime(1));
+        secDown10Btn.addEventListener('click', () => adjustClockTime(-10));
+        secUp10Btn.addEventListener('click', () => adjustClockTime(10));
         addEventBtn.addEventListener('click', () => {
             addEvent({
                 name: 'New Event',
